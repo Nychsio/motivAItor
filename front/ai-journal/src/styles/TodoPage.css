@@ -1,0 +1,431 @@
+/* src/styles/TodoPage.css */
+
+.todo-container {
+    min-height: 100vh;
+    position: relative;
+    overflow-x: hidden;
+    font-family: 'Segoe UI', sans-serif;
+    color: #fff;
+}
+
+/* Tła (bez zmian) */
+.todo-background { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; }
+.todo-gif-background { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-size: cover; filter: blur(8px); }
+.todo-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); }
+
+.todo-content {
+    position: relative;
+    z-index: 10;
+    padding: 20px;
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+/* Header */
+.todo-header-glass {
+    backdrop-filter: blur(20px);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+.todo-back-btn {
+    background: transparent; border: 1px solid rgba(255,255,255,0.2);
+    color: white; padding: 8px 16px; border-radius: 12px; cursor: pointer;
+}
+
+/* GRID LAYOUT */
+.todo-main-grid {
+    display: grid;
+    grid-template-columns: 3fr 2fr; /* 60% Zadania, 40% AI/Projekty */
+    gap: 24px;
+    height: calc(100vh - 140px); /* Dopasowanie do ekranu */
+}
+
+/* KARTY */
+.todo-glass-card {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+}
+.mt-4 { margin-top: 24px; }
+.mb-4 { margin-bottom: 24px; }
+
+.section-title, .card-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: #12d3b9;
+    margin-bottom: 16px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* LISTA ZADAŃ */
+.todo-list {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 200px;
+}
+
+.todo-task-item {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 12px;
+    border-radius: 12px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    cursor: grab; /* Łapka do przeciągania */
+    transition: all 0.2s;
+}
+.todo-task-item:active { cursor: grabbing; }
+.todo-task-item:hover { background: rgba(255, 255, 255, 0.08); }
+
+.todo-checkbox {
+    width: 20px; height: 20px; border: 2px solid #12d3b9; border-radius: 6px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+.todo-task-content { flex: 1; }
+.task-title { font-size: 14px; color: white; }
+.task-desc { font-size: 12px; color: rgba(255,255,255,0.6); margin-top: 4px; }
+.subtask-item { font-size: 11px; color: #9945ff; margin-left: 10px; margin-top: 2px; }
+
+/* AI CHAT */
+.ai-chat-card {
+    flex: 1; /* Rozciągnij na resztę wysokości */
+    position: relative;
+    overflow: hidden;
+}
+
+/* Styl Drop Zone */
+.ai-chat-card.drag-active {
+    background: rgba(18, 211, 185, 0.15);
+    border: 2px dashed #12d3b9;
+}
+.ai-chat-card.drag-active .drag-overlay {
+    display: flex;
+}
+.drag-overlay {
+    display: none;
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.7);
+    color: #12d3b9;
+    font-weight: bold;
+    font-size: 18px;
+    justify-content: center;
+    align-items: center;
+    pointer-events: none;
+    z-index: 50;
+}
+
+.chat-messages-area {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 0;
+}
+
+.chat-msg {
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 13px;
+    max-width: 90%;
+    line-height: 1.4;
+}
+.chat-msg.ai { background: rgba(255,255,255,0.1); align-self: flex-start; color: #ddd; }
+.chat-msg.user { background: linear-gradient(135deg, #9945ff, #7c3aed); align-self: flex-end; }
+.chat-msg.system { align-self: center; font-size: 11px; color: #12d3b9; background: transparent; border: 1px solid rgba(18,211,185,0.3); }
+
+.chat-input-area {
+    display: flex; gap: 8px; margin-top: 10px;
+}
+.chat-input-area input {
+    flex: 1; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2);
+    padding: 10px; border-radius: 8px; color: white;
+}
+.chat-input-area button {
+    background: #12d3b9; border: none; border-radius: 8px; width: 40px; cursor: pointer;
+}
+
+.context-badge {
+    background: rgba(18, 211, 185, 0.2);
+    color: #12d3b9;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+}
+
+/* PROJEKTY */
+.projects-list { display: flex; flex-direction: column; gap: 12px; }
+.project-header { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
+.project-progress-bg { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
+.project-progress-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+
+/* input */
+.todo-input-row { display: flex; gap: 8px; margin-bottom: 16px; }
+.todo-input { flex: 1; padding: 10px; border-radius: 10px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; }
+.todo-add-btn { background: #12d3b9; border: none; padding: 0 20px; border-radius: 10px; font-weight: bold; cursor: pointer; }
+
+/* Responsive */
+@media (max-width: 1024px) {
+    .todo-main-grid { grid-template-columns: 1fr; }
+    .ai-column { height: 600px; }
+}
+/* BRAIN DUMP BUTTON */
+.section-header-row {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;
+}
+.brain-dump-btn {
+    background: rgba(153, 69, 255, 0.2);
+    border: 1px solid rgba(153, 69, 255, 0.5);
+    color: #ce9eff;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+.brain-dump-btn:hover {
+    background: rgba(153, 69, 255, 0.4);
+    box-shadow: 0 0 10px rgba(153, 69, 255, 0.3);
+}
+
+/* MODAL STYLES */
+.modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(5px);
+    display: flex; justify-content: center; align-items: center;
+    z-index: 1000;
+}
+.modal-glass {
+    width: 500px;
+    background: linear-gradient(145deg, rgba(20,20,20,0.9), rgba(30,30,30,0.95));
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    padding: 30px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    display: flex; flex-direction: column; gap: 16px;
+}
+.modal-glass h3 { color: white; margin: 0; }
+.modal-glass p { color: rgba(255,255,255,0.6); font-size: 13px; margin: 0; }
+
+.modal-glass textarea {
+    width: 100%; height: 150px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 16px;
+    color: white;
+    resize: none;
+    font-family: 'Segoe UI', sans-serif;
+}
+.modal-glass textarea:focus { outline: none; border-color: #9945ff; }
+
+.modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 10px; }
+.cancel-btn {
+    background: transparent; border: 1px solid rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.7); padding: 10px 20px; border-radius: 10px; cursor: pointer;
+}
+.process-btn {
+    background: linear-gradient(135deg, #9945ff, #7c3aed);
+    border: none; color: white; padding: 10px 24px; border-radius: 10px; font-weight: bold; cursor: pointer;
+}
+.process-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Nawigacja Daty */
+.todo-date-nav-controls {
+    display: flex; align-items: center; gap: 20px;
+}
+.nav-arrow {
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+    color: white; width: 32px; height: 32px; border-radius: 50%;
+    cursor: pointer; transition: all 0.3s;
+}
+.nav-arrow:hover { background: rgba(18, 211, 185, 0.3); border-color: #12d3b9; }
+.current-date-display { font-size: 18px; margin: 0; min-width: 250px; text-align: center; }
+
+/* Brain Dump Inline */
+.brain-dump-area {
+    width: 100%; height: 100px;
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px; padding: 12px; color: white; resize: none;
+    font-family: inherit; margin-bottom: 12px;
+}
+.brain-dump-area:focus { outline: none; border-color: #9945ff; }
+
+.brain-dump-action-btn {
+    width: 100%; padding: 10px;
+    background: linear-gradient(135deg, #9945ff, #7c3aed);
+    border: none; border-radius: 10px; color: white; font-weight: bold;
+    cursor: pointer;
+}
+.brain-dump-action-btn:disabled { opacity: 0.6; }
+
+.full-height { height: 100%; }
+
+/* Badge Priorytetu */
+.badge-priority {
+    font-size: 10px; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; font-weight: bold; margin-right: 6px;
+}
+.badge-priority.high { background: rgba(255, 77, 77, 0.2); color: #ff4d4d; border: 1px solid rgba(255, 77, 77, 0.4); }
+.badge-priority.low { background: rgba(100, 255, 100, 0.2); color: #64ff64; }
+
+/* Badge Projektu */
+.badge-project {
+    font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.1);
+}
+
+/* Nowy Input Bar */
+.input-card { padding: 16px !important; }
+.input-options { display: flex; gap: 8px; margin-bottom: 8px; }
+.mini-select {
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: #aaa;
+    border-radius: 6px; padding: 4px; font-size: 11px;
+}
+.input-main { display: flex; gap: 8px; }
+.todo-input-clean {
+    flex: 1; background: transparent; border: none; color: white; font-size: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.2);
+}
+.todo-input-clean:focus { outline: none; border-color: #12d3b9; }
+
+/* Drag & Drop Visuals */
+.task-list-drop-zone { min-height: 50px; }
+.drag-over-ai { background: rgba(18, 211, 185, 0.15) !important; border-color: #12d3b9 !important; }
+.drop-hint {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-weight: bold; color: #12d3b9; font-size: 20px; pointer-events: none;
+}
+/* --- POPRAWKI STYLU INPUTÓW --- */
+
+.input-card {
+    padding: 16px !important;
+}
+
+.input-options {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+/* Stylowanie Selectów */
+.mini-select {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #ddd;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.mini-select:focus {
+    outline: none;
+    border-color: #12d3b9;
+    background: rgba(0, 0, 0, 0.6);
+}
+
+/* Kolorki selecta priorytetu */
+.mini-select.priority-high { color: #ff6b6b; border-color: rgba(255, 107, 107, 0.3); }
+.mini-select.priority-medium { color: #feca57; }
+.mini-select.priority-low { color: #1dd1a1; }
+
+.input-main {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.todo-input-clean {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: white;
+    font-size: 14px;
+    transition: all 0.3s;
+}
+.todo-input-clean:focus {
+    outline: none;
+    border-color: #12d3b9;
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 0 2px rgba(18, 211, 185, 0.1);
+}
+
+.add-btn {
+    background: linear-gradient(135deg, #12d3b9 0%, #09d0d7 100%);
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    color: #000;
+    font-weight: bold;
+    font-size: 12px;
+    cursor: pointer;
+    transition: transform 0.2s;
+    white-space: nowrap;
+}
+.add-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(18, 211, 185, 0.3);
+}
+
+/* POPRAWKI DRAG & DROP */
+.todo-task-item {
+    /* Ważne dla płynności */
+    user-select: none;
+    margin-bottom: 8px;
+}
+
+/* Styl elementu w trakcie przeciągania */
+.todo-task-item.dragging {
+    background: rgba(18, 211, 185, 0.2);
+    border: 1px solid #12d3b9;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    z-index: 9999; /* Musi być na wierzchu */
+}
+/* Przycisk usuwania w zadaniu */
+.delete-task-btn {
+    background: transparent;
+    border: none;
+    font-size: 14px;
+    cursor: pointer;
+    opacity: 0; /* Ukryty domyślnie */
+    transition: all 0.2s;
+    padding: 4px 8px;
+    border-radius: 6px;
+    margin-left: 8px;
+}
+
+.delete-task-btn:hover {
+    background: rgba(255, 77, 77, 0.2);
+    transform: scale(1.1);
+}
+
+/* Pokazuj przycisk tylko gdy najedziesz myszką na zadanie */
+.todo-task-item:hover .delete-task-btn {
+    opacity: 1;
+}
+
+/* Poprawka układu wiersza */
+.task-row-main {
+    display: flex;
+    align-items: flex-start; /* lub center */
+    width: 100%;
+}
