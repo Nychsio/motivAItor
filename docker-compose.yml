@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # 1. Baza Danych (PostgreSQL)
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: aijournal_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 2. Backend (FastAPI)
+  backend:
+    build: 
+      context: ./aijournal-backend
+    container_name: aijournal_backend
+    ports:
+      - "3001:3001"
+    depends_on:
+      - db
+    volumes:
+      - ./aijournal-backend:/app
+    environment:
+      # Łączymy się z serwisem 'db', nie localhostem!
+      DATABASE_URL: postgresql://admin:password123@db:5432/aijournal_db
+      SECRET_KEY: "super_tajny_klucz_dla_piotra"
+      ALGORITHM: "HS256"
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      # Adres do Twojego LM Studio na Windowsie (host)
+      LM_STUDIO_URL: "http://host.docker.internal:1234/v1/chat/completions"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # 3. Frontend (React)
+  frontend:
+    build: 
+      context: ./front/ai-journal
+    container_name: aijournal_frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      # Montowanie kodu, żeby zmiany w React działały od razu (Hot Reload)
+      - ./front/ai-journal/src:/app/src
+    environment:
+      # React musi wiedzieć gdzie strzelać
+      - REACT_APP_API_URL=http://localhost:3001
+    stdin_open: true
+    tty: true
+
+volumes:
+  postgres_data:

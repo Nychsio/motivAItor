@@ -8,15 +8,31 @@ import requests
 import json
 from typing import List
 from pydantic import BaseModel
+import time
+from sqlalchemy.exc import OperationalError
 # Importujemy nasze moduły
 from database import get_db, engine
 import models
 import schemas
 import crud
 import auth
+import os
 
-# Tworzy tabele w bazie (jeśli nie istnieją)
-models.Base.metadata.create_all(bind=engine)
+# Pętla oczekiwania na bazę danych (Retry Pattern)
+MAX_RETRIES = 10
+WAIT_SECONDS = 3
+
+for i in range(MAX_RETRIES):
+    try:
+        print(f"Próba połączenia z bazą ({i+1}/{MAX_RETRIES})...")
+        models.Base.metadata.create_all(bind=engine)
+        print("Sukces! Baza danych podłączona.")
+        break
+    except OperationalError:
+        print(f"Baza jeszcze nie gotowa. Czekam {WAIT_SECONDS}s...")
+        time.sleep(WAIT_SECONDS)
+else:
+    print("Nie udało się połączyć z bazą po wielu próbach.")
 
 app = FastAPI()
 
