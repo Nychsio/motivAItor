@@ -2,21 +2,24 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import timedelta, date
+from datetime import timedelta, date, datetime
 import uuid
 import requests
 import json
 from typing import List
 from pydantic import BaseModel
 import time
+import random
 from sqlalchemy.exc import OperationalError
+import os
+
 # Importujemy nasze moduły
 from database import get_db, engine
 import models
 import schemas
 import crud
 import auth
-import os
+import rag # <--- TWÓJ MODUŁ RAG (musi być plik rag.py obok)
 
 # Pętla oczekiwania na bazę danych (Retry Pattern)
 MAX_RETRIES = 10
@@ -55,18 +58,13 @@ async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(), 
     db: Session = Depends(get_db)
 ):
-    """
-    Logowanie. Zwraca token JWT.
-    """
     user = crud.get_user_by_email(db, email=form_data.username)
-    
     if not user or not auth.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
     access_token_expires = timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = auth.create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
@@ -75,7 +73,6 @@ async def login_for_access_token(
 
 @app.get("/api/users/me", response_model=schemas.User)
 async def read_users_me(current_user: models.User = Depends(auth.get_current_active_user)):
-    """Pobiera dane zalogowanego użytkownika."""
     return current_user
 
 # === ENDPOINTY ZADAŃ ===
@@ -86,15 +83,30 @@ def create_task(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
-    return crud.create_user_task(db=db, task=task, user_id=current_user.id)
+    new_task = crud.create_user_task(db=db, task=task, user_id=current_user.id)
+    
+    # --- RAG: KARMIENIE BAZY ---
+    try:
+        rag.add_document(
+            doc_id=f"task_{new_task.id}",
+            text=new_task.content,
+            metadata={
+                "type": "task", 
+                "date": str(new_task.task_date) if new_task.task_date else "inbox",
+                "project_id": str(new_task.project_id or "none")
+            }
+        )
+    except Exception as e:
+        print(f"RAG Error (Task): {e}")
+    # ---------------------------
 
-# WAŻNE: Ten endpoint musi być PRZED /{task_date}, żeby "inbox" nie zostało potraktowane jako data!
+    return new_task
+
 @app.get("/api/tasks/inbox", response_model=list[schemas.Task])
 def read_inbox_tasks(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
-    """Pobiera zadania z Brain Dumpa (bez daty)."""
     return crud.get_inbox_tasks(db=db, user_id=current_user.id)
 
 @app.get("/api/tasks/{task_date}", response_model=list[schemas.Task])
@@ -105,10 +117,9 @@ def read_tasks_for_date(
 ):
     return crud.get_tasks_by_date(db=db, user_id=current_user.id, task_date=task_date)
 
-# NOWY ENDPOINT: UPDATE (Dla Drag & Drop)
 @app.put("/api/tasks/{task_id}", response_model=schemas.Task)
 def update_task(
-    task_id: int, # <--- int, nie UUID!
+    task_id: int,
     task_update: schemas.TaskUpdate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
@@ -120,7 +131,7 @@ def update_task(
 
 @app.put("/api/tasks/{task_id}/toggle", response_model=schemas.Task)
 def toggle_task_status(
-    task_id: int, # <--- int, nie UUID!
+    task_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
@@ -131,7 +142,7 @@ def toggle_task_status(
 
 @app.delete("/api/tasks/{task_id}")
 def delete_task(
-    task_id: int, # <--- int, nie UUID!
+    task_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
@@ -141,17 +152,13 @@ def delete_task(
     return crud.delete_task(db=db, db_task=db_task)
 
 
-# === ENDPOINTY PROJEKTÓW (NOWE) ===
+# === ENDPOINTY PROJEKTÓW ===
 
 @app.get("/api/projects", response_model=List[schemas.Project])
 def read_projects(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
-    """
-    Pobiera projekty wraz ze statystykami (Momentum, Rdzewienie).
-    CRUD automatycznie wylicza 'is_rusting' i 'progress'.
-    """
     return crud.get_projects_with_stats(db=db, user_id=current_user.id)
 
 @app.post("/api/projects", response_model=schemas.Project)
@@ -160,31 +167,14 @@ def create_new_project(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
-    """
-    Tworzy projekt z opcjonalnym Master Promptem (kontekstem).
-    """
     return crud.create_project(db=db, project=project, user_id=current_user.id)
 
-# (Opcjonalnie) Endpoint do aktualizacji czasu pomodoro lub kontekstu
-# @app.put("/api/projects/{project_id}") ... (zrobimy jak będzie potrzebne)
-
-
-# === AI BRAIN DUMP ===
-
-# W pliku main.py
+# === AI BRAIN DUMP & TOOLS ===
 
 def call_lm_studio(text: str, system_prompt: str = None) -> str:
-    """
-    Wywołuje LM Studio. Jeśli podano system_prompt, nadpisuje domyślny.
-    """
     LM_STUDIO_URL = "http://localhost:1234/v1/chat/completions"
-    
-    # Domyślny prompt, jeśli nie podano innego
     if not system_prompt:
-        system_prompt = """
-        Jesteś agentem produktywności. Twoim zadaniem jest konwertowanie
-        luźnego tekstu (brain dump) na listę konkretnych zadań w formacie JSON.
-        """
+        system_prompt = "Jesteś asystentem produktywności."
     
     payload = {
         "model": "local-model",
@@ -199,15 +189,10 @@ def call_lm_studio(text: str, system_prompt: str = None) -> str:
     try:
         print(f"AI Request: Wysyłam do {LM_STUDIO_URL}...")
         response = requests.post(LM_STUDIO_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=60)
-        
         if response.status_code != 200:
-            print(f"AI Error: Status {response.status_code}, Body: {response.text}")
-            # Zwracamy pusty string lub rzucamy błąd, żeby obsłużyć to wyżej
-            return "[]" 
-            
+            return "[]"
         data = response.json()
         return data['choices'][0]['message']['content']
-            
     except Exception as e:
         print(f"AI Critical Error: {e}")
         return "[]"
@@ -218,34 +203,21 @@ def process_braindump_with_ai(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
-    print(f"AI: Przetwarzam Brain Dump: '{request.text}'")
-    
-    # Wywołanie AI (używa tej samej funkcji co czat, ale z innym promptem)
     system_prompt = """
-    Jesteś asystentem GTD (Getting Things Done). 
-    Twoim zadaniem jest przekonwertowanie luźnego strumienia myśli (brain dump) 
-    na listę konkretnych, wykonalnych zadań w formacie JSON.
-    Zwróć TYLKO listę stringów, np.: ["Kupić mleko", "Napisać raport"].
+    Jesteś asystentem GTD. Konwertuj brain dump na listę zadań JSON (lista stringów).
+    NP: ["Zadanie 1", "Zadanie 2"]. Tylko JSON.
     """
-    
-    # Musimy zmodyfikować call_lm_studio, by zwracało listę, LUB parsujemy tu ręcznie.
-    # Dla uproszczenia zakładam, że AI zwróci JSON string.
     try:
         response_text = call_lm_studio(request.text, system_prompt)
-        # Proste czyszczenie markdowna, jeśli AI go doda
         clean_text = response_text.replace("```json", "").replace("```", "").strip()
         task_list = json.loads(clean_text)
-        
         if not isinstance(task_list, list):
-            task_list = [clean_text] # Fallback
-            
-    except Exception as e:
-        print(f"Błąd parsowania AI: {e}")
-        task_list = [request.text] # Fallback: cała treść jako jedno zadanie
+            task_list = [clean_text]
+    except Exception:
+        task_list = [request.text]
 
     created_tasks = []
     for content in task_list:
-        # Tworzymy zadanie
         task_data = schemas.TaskCreate(
             content=str(content),
             task_date=request.task_date,
@@ -253,115 +225,70 @@ def process_braindump_with_ai(
             points=10
         )
         new_task = crud.create_user_task(db=db, task=task_data, user_id=current_user.id)
-        created_tasks.append(new_task)
         
+        # --- RAG INDEXING ---
+        rag.add_document(f"task_{new_task.id}", new_task.content, {"type": "task", "date": str(request.task_date or "inbox")})
+        # --------------------
+        
+        created_tasks.append(new_task)
     return created_tasks
-# Wklej to do main.py (upewnij się, że masz importy schemas i crud)
-
-
-# W main.py, obok innych funkcji AI
 
 def ai_estimate_calories(text: str) -> int:
-    """
-    Pyta LM Studio o kaloryczność posiłku.
-    """
+    # ... (kod bez zmian, można dodać cache RAG w przyszłości)
     LM_STUDIO_URL = "http://localhost:1234/v1/chat/completions"
-    
-    SYSTEM_PROMPT = """
-    Jesteś dietetykiem. Twoim zadaniem jest oszacowanie kalorii w opisanym posiłku.
-    ZASADY:
-    1. Odpowiedz TYLKO jedną liczbą całkowitą (ilość kcal).
-    2. Żadnego tekstu, żadnych wyjaśnień. Tylko liczba (np. 450).
-    3. Jeśli nie wiesz, zgaduj na podstawie średnich wartości.
-    """
-    
     payload = {
         "model": "local-model",
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Oszacuj kalorie dla: {text}"}
+            {"role": "system", "content": "Jesteś dietetykiem. Podaj TYLKO liczbę kalorii (int)."},
+            {"role": "user", "content": f"Oszacuj kalorie: {text}"}
         ],
-        "temperature": 0.1, # Niska temperatura, żeby nie zmyślał dziwnych liczb
-        "stream": False
+        "temperature": 0.1
     }
-
     try:
-        response = requests.post(LM_STUDIO_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=10)
-        data = response.json()
-        content = data['choices'][0]['message']['content'].strip()
-        
-        # Próbujemy wyciągnąć liczbę z odpowiedzi (czyszczenie z kropki itp)
+        response = requests.post(LM_STUDIO_URL, json=payload, timeout=10)
+        content = response.json()['choices'][0]['message']['content']
         import re
         numbers = re.findall(r'\d+', content)
-        if numbers:
-            return int(numbers[0])
-        return 0
-    except Exception as e:
-        print(f"AI Diet Error: {e}")
+        return int(numbers[0]) if numbers else 0
+    except:
         return 0
 
-
-# --- ENDPOINT ---
 @app.post("/api/ai/estimate-calories")
 def estimate_calories(request: schemas.CalorieRequest):
-    calories = ai_estimate_calories(request.text)
-    return {"calories": calories}
+    return {"calories": ai_estimate_calories(request.text)}
 
-@app.post("/api/ai/chat")
+# === RAG ENHANCED CHAT ===
+
 @app.post("/api/ai/chat")
 def chat_with_context(
     request: schemas.AIChatRequest,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
-    """
-    Endpoint obsługujący czat z kontekstem zadania i projektu.
-    """
+    # 1. RAG SEARCH (Szukamy wiedzy w bazie)
+    context_from_db = rag.search_documents(request.message, n_results=3)
     
-    # 1. Budowanie kontekstu
-    context_info = ""
-    project_context = "" 
-    
+    # 2. Budujemy Prompt z kontekstem RAG i Projektem
+    project_context = ""
     if request.context_task_id:
-        # Używamy poprawnej funkcji crud (bez _simple)
         task = crud.get_task_by_id(db, task_id=request.context_task_id, user_id=current_user.id)
-        
-        if task:
-            status_txt = "Zrobione" if task.is_completed else "Do zrobienia"
-            
-            # --- USUNĄŁEM LINIJKĘ O SUBTASKS BO ICH NIE MA W BAZIE ---
-            
-            context_info += (
-                f"\nKONTEKST ZADANIA:\n"
-                f"- Tytuł: {task.content}\n"
-                f"- Status: {status_txt}\n"
-            )
-            
-            # 2. Wyciągamy kontekst PROJEKTU (jeśli zadanie ma projekt)
-            if task.project_id:
-                project = db.query(models.Project).filter(models.Project.id == task.project_id).first()
-                if project and project.context:
-                    project_context = f"\n💡 MASTER PROMPT PROJEKTU '{project.name}':\n{project.context.master_prompt}\n"
-    
-    # 3. Tworzenie Promptu Systemowego
+        if task and task.project_id:
+            project = db.query(models.Project).filter(models.Project.id == task.project_id).first()
+            if project and project.context:
+                project_context = f"\nMASTER PROMPT PROJEKTU: {project.context.master_prompt}"
+
     system_prompt = f"""
-    Jesteś mentorem 'Tough Love'. Jesteś krótki, konkretny i pomocny.
+    Jesteś asystentem produktywności.
+    KORZYSTAJ Z TEJ WIEDZY Z BAZY DANYCH (Jeśli pasuje do pytania):
+    {context_from_db}
+    
     {project_context}
-    JEŚLI użytkownik prosi o rozbicie zadania na kroki:
-    - Zwróć je w formacie listy Markdown.
-    - Bądź zwięzły.
+    
+    Odpowiadaj krótko i konkretnie.
     """
     
-    # 4. Zapytanie do AI
-    full_message = f"{context_info}\nPYTANIE UŻYTKOWNIKA: {request.message}"
-    
-    ai_response = call_lm_studio(full_message, system_prompt)
-    
-    return {"reply": ai_response}
-
-
-
-
+    reply = call_lm_studio(request.message, system_prompt)
+    return {"reply": reply}
 
 # === ENDPOINTY HEALTH & POMODORO ===
 
@@ -371,8 +298,15 @@ def create_health_entry(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
-    """Zapisuje dzienne statystyki zdrowia."""
-    return crud.create_daily_health(db=db, health=health, user_id=current_user.id)
+    new_entry = crud.create_daily_health(db=db, health=health, user_id=current_user.id)
+    
+    # --- RAG INDEXING ---
+    # AI musi pamiętać, że byłeś gruby/smutny danego dnia
+    note_content = f"Dnia {new_entry.date}: Waga {new_entry.weight}kg, Sen {new_entry.sleep_hours}h. Notatka: {new_entry.note}"
+    rag.add_document(f"health_{new_entry.id}", note_content, {"type": "health", "date": str(new_entry.date)})
+    # --------------------
+    
+    return new_entry
 
 @app.post("/api/pomodoro", response_model=schemas.PomodoroSession)
 def create_pomodoro_session(
@@ -380,16 +314,97 @@ def create_pomodoro_session(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
-    """Loguje zakończoną sesję Pomodoro."""
     return crud.create_pomodoro(db=db, pomodoro=session, user_id=current_user.id)
 
 
-# W main.py pod innymi endpointami zadań
+# === LOGIKA OCENY I ROASTU (DAN PEÑA MODE + RAG) ===
 
-@app.get("/api/tasks/inbox", response_model=list[schemas.Task])
-def read_inbox_tasks(
+def calculate_performance_score(db: Session, user_id: int):
+    # (Kod bez zmian - logika punktów)
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    tasks_today = crud.get_tasks_by_date(db, user_id, today)
+    completed_today = len([t for t in tasks_today if t.is_completed])
+    tasks_yesterday = crud.get_tasks_by_date(db, user_id, yesterday)
+    completed_yesterday = len([t for t in tasks_yesterday if t.is_completed])
+    projects = crud.get_projects_with_stats(db, user_id)
+    rusting_count = len([p for p in projects if p.stats['is_rusting']])
+    
+    score = 50 
+    score += (completed_today * 15)
+    score += (completed_yesterday * 5)
+    score -= (rusting_count * 20)
+    return max(0, min(100, score)), completed_today, rusting_count
+
+@app.get("/api/ai/roast")
+def get_daily_roast(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
-    """Pobiera zadania z Brain Dumpa (bez daty)."""
-    return crud.get_inbox_tasks(db=db, user_id=current_user.id)
+    score, completed, rusting = calculate_performance_score(db, current_user.id)
+    
+    # RAG dla Roasta - sprawdzamy co user ostatnio robił, żeby go lepiej obrazić
+    recent_context = rag.search_documents("wymówki lenistwo problemy", n_results=2)
+
+    system_prompt = f"""
+    Jesteś Danem Peña. Wynik usera: {score}/100.
+    Ostatnia aktywność usera (z bazy): {recent_context}
+    
+    Jeśli wynik < 30: Zniszcz go. Wykorzystaj wiedzę z bazy przeciwko niemu.
+    Jeśli wynik > 70: Tough love.
+    Krótko (2 zdania).
+    """
+    
+    roast_text = call_lm_studio("Roast me", system_prompt)
+    if not roast_text: roast_text = "Nawet AI nie chce z tobą gadać."
+    return {"roast": roast_text, "score": score}
+
+@app.post("/api/ai/roast-chat")
+def chat_with_roast_master(
+    request: schemas.AIChatRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    score, _, _ = calculate_performance_score(db, current_user.id)
+    
+    # RAG w dyskusji z Danem
+    context = rag.search_documents(request.message, n_results=2)
+
+    system_prompt = f"""
+    Jesteś Danem Peña. Wynik: {score}/100.
+    Użytkownik się tłumaczy: "{request.message}"
+    
+    FAKTY Z BAZY (Użyj, by wykazać mu kłamstwo):
+    {context}
+    
+    Zmiażdż wymówkę faktami.
+    """
+    
+    reply = call_lm_studio(request.message, system_prompt)
+    return {"reply": reply}
+
+# === ADMIN TOOLS (RAG REINDEX) ===
+@app.post("/api/admin/reindex-rag")
+def reindex_existing_data(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    """
+    Uruchom to RAZ, żeby wczytać stare dane do ChromaDB.
+    """
+    # 1. Zadania
+    tasks = db.query(models.Task).filter(models.Task.owner_id == current_user.id).all()
+    t_count = 0
+    for t in tasks:
+        rag.add_document(f"task_{t.id}", t.content, {"type": "task", "date": str(t.task_date or "inbox")})
+        t_count += 1
+        
+    # 2. Zdrowie
+    healths = db.query(models.DailyHealth).filter(models.DailyHealth.user_id == current_user.id).all()
+    h_count = 0
+    for h in healths:
+        note = f"Dnia {h.date}: Waga {h.weight}, Sen {h.sleep_hours}. {h.note or ''}"
+        rag.add_document(f"health_{h.id}", note, {"type": "health", "date": str(h.date)})
+        h_count += 1
+        
+    return {"status": "success", "indexed_tasks": t_count, "indexed_health": h_count}
