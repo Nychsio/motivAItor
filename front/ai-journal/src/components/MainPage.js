@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import '../styles/MainPage.css';
 import PomodoroTimer from './PomodoroTimer'; 
+import { api } from '../services/api'; // Import API
+import { getAvatarForScore } from '../config/avatarConfig'; // Import konfiguracji awatarów
 
 const MainPage = ({ onNavigate, onLogout }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
   
   // --- STANY DANYCH ---
-  const [projects, setProjects] = useState([]);
+  const [projects, setProjects] = useState([]); // Domyślnie pusta tablica
   const [physicsData, setPhysicsData] = useState({
     sleep: 0, weight: 0, calories: 0, calorieGoal: 2200
   });
@@ -16,11 +18,13 @@ const MainPage = ({ onNavigate, onLogout }) => {
     count: 0, tasks: [], loading: true
   });
 
+  // --- STANY RPG (S.W.H.) ---
+  const [rpgStats, setRpgStats] = useState({ S: 0, W: 0, H: 0 });
+
   // --- STANY ROAST MASTER ---
-  // roastData.roast -> To jest tekst, który wyświetla się w Hero (odpowiedź AI)
   const [roastData, setRoastData] = useState({ roast: 'Inicjalizacja łącza z Danem...', score: 50 });
-  const [chatInput, setChatInput] = useState(''); // Stan dolnego paska
-  const [isSending, setIsSending] = useState(false); // Żeby zablokować enter podczas wysyłania
+  const [chatInput, setChatInput] = useState(''); 
+  const [isSending, setIsSending] = useState(false); 
 
   // --- ZEGAR ---
   useEffect(() => {
@@ -32,33 +36,41 @@ const MainPage = ({ onNavigate, onLogout }) => {
   useEffect(() => {
     fetchTodayTasks();
     fetchProjects(); 
-    fetchRoast(); // <-- Pobieramy pierwszy komentarz na start
+    fetchRoast(); 
+    fetchRpgStats(); 
     
     const savedUser = localStorage.getItem('username') || 'Studencie';
     setUsername(savedUser.split('@')[0]); 
   }, []);
 
   // --- API CALLS ---
+  
+  // [FIX] Zabezpieczona funkcja pobierania projektów
   const fetchProjects = async () => {
     try {
-        const res = await fetch('http://localhost:3001/api/projects', {
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('accessToken')}` }
-        });
-        if(res.ok) setProjects(await res.json());
-    } catch (e) { console.error(e); }
+        const res = await api.getProjects();
+        // Sprawdzamy, czy to faktycznie tablica, zanim ustawimy stan
+        if (Array.isArray(res)) {
+            setProjects(res);
+        } else {
+            console.error("API zwróciło błędny format projektów:", res);
+            setProjects([]); // Fallback do pustej tablicy
+        }
+    } catch (e) { 
+        console.error("Błąd fetchProjects:", e); 
+        setProjects([]); 
+    }
   };
 
   const fetchTodayTasks = async () => {
-    const token = localStorage.getItem('accessToken');
-    if (!token) return;
-    const dateStr = new Date().toISOString().split('T')[0];
     try {
-        const response = await fetch(`http://localhost:3001/api/tasks/${dateStr}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (response.ok) {
-            const data = await response.json();
+        const dateStr = new Date().toISOString().split('T')[0];
+        const data = await api.getTasks(dateStr);
+        // Tutaj też warto dodać sprawdzenie
+        if (Array.isArray(data)) {
             setTodoWidgetData({ count: data.length, tasks: data.slice(0, 3), loading: false });
+        } else {
+            setTodoWidgetData({ count: 0, tasks: [], loading: false });
         }
     } catch (error) { console.error(error); }
   };
@@ -76,21 +88,29 @@ const MainPage = ({ onNavigate, onLogout }) => {
     } catch (e) { console.error(e); }
   };
 
-  // --- NOWA LOGIKA CZATU (Z DOLNEGO PASKA) ---
+  const fetchRpgStats = async () => {
+      try {
+          const stats = await api.getGamificationStats();
+          if (stats) setRpgStats(stats);
+      } catch (e) {
+          console.error("Błąd pobierania statystyk RPG:", e);
+      }
+  };
+
+  // --- CZAT ---
   const handleGlobalChat = async () => {
     if (!chatInput.trim() || isSending) return;
     
     const userMsg = chatInput;
-    setChatInput(''); // Czyścimy pasek
+    setChatInput(''); 
     setIsSending(true);
     
-    // Optymistyczna aktualizacja (żebyś widział, że coś się dzieje)
     const oldRoast = roastData.roast;
     setRoastData(prev => ({ ...prev, roast: "Myślę nad ripostą..." }));
 
-    const token = localStorage.getItem('accessToken');
     try {
-        const res = await fetch('http://localhost:3001/api/ai/roast-chat', {
+        const token = localStorage.getItem('accessToken');
+        const response = await fetch('http://localhost:3001/api/ai/roast-chat', {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json',
@@ -98,16 +118,15 @@ const MainPage = ({ onNavigate, onLogout }) => {
             },
             body: JSON.stringify({ message: userMsg })
         });
-        
-        if (res.ok) {
-            const data = await res.json();
-            // Odpowiedź AI trafia na górę do Hero Section
+
+        if (response.ok) {
+            const data = await response.json();
             setRoastData(prev => ({ ...prev, roast: data.reply }));
         } else {
             setRoastData(prev => ({ ...prev, roast: "Błąd połączenia. Dan poszedł na kawę." }));
         }
     } catch (e) {
-        setRoastData(prev => ({ ...prev, roast: oldRoast })); // Przywracamy stary tekst w razie błędu
+        setRoastData(prev => ({ ...prev, roast: oldRoast }));
     } finally {
         setIsSending(false);
     }
@@ -121,17 +140,11 @@ const MainPage = ({ onNavigate, onLogout }) => {
     return hour < 12 ? 'Dzień dobry' : (hour < 18 ? 'Dzień dobry' : 'Dobry wieczór');
   };
 
-  const getScoreColor = (score) => {
-      if (score < 40) return '#ff4d4d'; // Czerwony
-      if (score < 75) return '#f7931a'; // Pomarańcz
-      return '#12d3b9'; // Cyjan
-  };
+  // Dobór awatara (zabezpieczony przed brakiem danych)
+  const currentAvatar = getAvatarForScore(rpgStats.S || 0, rpgStats.W || 0, rpgStats.H || 0);
 
   return (
     <div className="main-container" style={{ paddingBottom: '100px' }}> 
-      {/* paddingBottom żeby dolny pasek nie zasłaniał treści na dole */}
-
-      {/* TŁO */}
       <div className="background">
         <div className="gif-background" style={{ backgroundImage: `url(/assets/steam.gif)` }}></div>
         <div className="overlay"></div>
@@ -154,40 +167,80 @@ const MainPage = ({ onNavigate, onLogout }) => {
 
       <div className="main-content">
         
-        {/* --- HERO SECTION: TYLKO WYŚWIETLACZ (EKRAN DANA) --- */}
+        {/* --- HERO SECTION: PIP-BOY HUD (V2 - SIDE BY SIDE) --- */}
         <div className="hero-dashboard" style={{ 
             transition: 'all 0.3s ease', 
             display: 'flex', 
-            flexDirection: 'column', 
-            gap: '15px',
-            borderLeft: `6px solid ${getScoreColor(roastData.score)}` // Kolorowy pasek z boku
+            flexDirection: 'row', // ZMIANA: Układ poziomy
+            alignItems: 'center', // Wycentrowanie w pionie
+            gap: '30px',          // Odstęp między obrazkiem a treścią
+            borderLeft: `6px solid #12d3b9`, 
+            padding: '20px',
+            minHeight: '300px'    // Żeby obrazek miał miejsce
         }}>
           
-          {/* Górna belka: Wynik + Emotka */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '10px' }}>
-             <div>
-                <h2 style={{margin:0, fontSize: '24px'}}>{getGreeting()}, {username}</h2>
-                <div style={{fontSize: '13px', opacity: 0.7, marginTop: '4px'}}>
-                    Performance Score: <strong style={{color: getScoreColor(roastData.score), fontSize: '18px'}}>{roastData.score}/100</strong>
-                </div>
-             </div>
-             <div style={{ fontSize: '48px', opacity: 0.9 }}>
-                 {roastData.score < 40 ? '🤬' : (roastData.score < 80 ? '😤' : '🗿')}
-             </div>
+          {/* LEWA STRONA: FIGURKA (Vault Boy) */}
+          <div style={{ 
+              flex: '0 0 auto', // Nie ściskaj obrazka
+              height: '280px',  // Wysokość kontroluje rozmiar (proporcje zachowane)
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              filter: 'drop-shadow(0 0 15px rgba(18, 211, 185, 0.4))' // Poświata zamiast ramki
+          }}>
+              <img 
+                src={currentAvatar.image} 
+                alt="PipBoy Status"
+                style={{ 
+                    height: '100%', 
+                    width: 'auto', 
+                    objectFit: 'contain' // Kluczowe dla pionowych PNG
+                }}
+                onError={(e) => { e.target.style.display='none'; }} 
+              />
           </div>
 
-          {/* Wyświetlacz Tekstu AI */}
-          <div style={{ flex: 1 }}>
-              <p style={{ 
-                  fontSize: '18px', 
-                  lineHeight: '1.6', 
-                  fontStyle: 'italic', 
-                  color: 'rgba(255,255,255,0.95)', 
-                  textShadow: '0 2px 4px rgba(0,0,0,0.5)',
-                  margin: 0
-              }}>
-                  "{roastData.roast}"
-              </p>
+          {/* PRAWA STRONA: DANE + STATYSTYKI */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              
+              {/* HEADER: Powitanie + Ranga */}
+              <div style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '10px' }}>
+                  <h2 style={{ margin: 0, fontSize: '32px', color: '#fff' }}>
+                      {getGreeting()}, {username}
+                  </h2>
+                  <div style={{ 
+                      color: '#12d3b9', 
+                      textTransform: 'uppercase', 
+                      letterSpacing: '2px', 
+                      fontSize: '16px', 
+                      marginTop: '5px',
+                      fontWeight: 'bold',
+                      textShadow: '0 0 10px rgba(18, 211, 185, 0.5)'
+                  }}>
+                      STATUS: {currentAvatar.label}
+                  </div>
+              </div>
+
+              {/* STATYSTYKI S.W.H. (Teraz jako lista pionowa po prawej stronie) */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <HeroStatBar label="SIŁA" value={rpgStats.S || 0} color="#ff4444" icon="💪" />
+                  <HeroStatBar label="WOLA" value={rpgStats.W || 0} color="#33b5e5" icon="🧠" />
+                  <HeroStatBar label="ZDROWIE" value={rpgStats.H || 0} color="#00C851" icon="❤️" />
+              </div>
+
+              {/* ROAST OD DANA (Mniejszy, na dole prawej kolumny) */}
+              <div style={{ marginTop: 'auto', paddingTop: '10px' }}>
+                  <p style={{ 
+                      fontSize: '14px', 
+                      lineHeight: '1.4', 
+                      fontStyle: 'italic', 
+                      color: 'rgba(255,255,255,0.6)', 
+                      margin: 0
+                  }}>
+                      "{roastData.roast}"
+                  </p>
+              </div>
+
           </div>
         </div>
 
@@ -222,11 +275,13 @@ const MainPage = ({ onNavigate, onLogout }) => {
             </div>
           </div>
 
-          {/* 3. PROJEKTY */}
+          {/* 3. PROJEKTY (TUTAJ BYŁ BŁĄD, TERAZ JEST FIX) */}
           <div className="main-stat-card" style={{gridColumn: 'span 2'}}>
             <div className="card-header"><h3>PROJECT HEALTH</h3><span className="card-icon">📊</span></div>
             <div className="card-content" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'16px'}}>
-                {projects.map(p => (
+                
+                {/* [FIX] Zabezpieczony map */}
+                {(Array.isArray(projects) ? projects : []).map(p => (
                     <div key={p.id} className={`project-card-mini ${p.stats?.is_rusting ? 'rusting' : ''}`} style={{padding:'12px', background:'rgba(255,255,255,0.05)', borderRadius:'12px', border: p.stats?.is_rusting ? '1px solid #ff6b35' : '1px solid rgba(255,255,255,0.1)'}}>
                         <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
                             <span style={{fontWeight:'bold', color: p.color}}>{p.name}</span>
@@ -238,7 +293,8 @@ const MainPage = ({ onNavigate, onLogout }) => {
                         </div>
                     </div>
                 ))}
-                {projects.length === 0 && <div style={{opacity:0.5, padding:'10px'}}>Brak projektów.</div>}
+                
+                {(!projects || projects.length === 0) && <div style={{opacity:0.5, padding:'10px'}}>Brak projektów.</div>}
             </div>
           </div>
           
@@ -269,64 +325,28 @@ const MainPage = ({ onNavigate, onLogout }) => {
 
         {/* STATUS FOOTER */}
         <div className="system-status">
-          <div className="status-item"><span className="status-dot online"></span><span>RAG Memory</span></div>
+          <div className="status-item"><span className="status-dot online"></span><span>S.W.H. System</span></div>
           <div className="status-item"><span className="status-dot online"></span><span>API Backend</span></div>
         </div>
 
       </div>
 
-      {/* --- FLOATING COMMAND BAR (NOWOŚĆ) --- */}
+      {/* --- FLOATING COMMAND BAR --- */}
       <div style={{
-          position: 'fixed',
-          bottom: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: '90%',
-          maxWidth: '600px',
-          zIndex: 9999, // Zawsze na wierzchu
-          display: 'flex',
-          gap: '10px',
-          padding: '10px',
-          background: 'rgba(20, 20, 30, 0.8)', // Ciemne, półprzezroczyste tło
-          backdropFilter: 'blur(12px)', // Efekt szkła
-          borderRadius: '16px',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-          boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
+          position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)',
+          width: '90%', maxWidth: '600px', zIndex: 9999, display: 'flex', gap: '10px',
+          padding: '10px', background: 'rgba(20, 20, 30, 0.8)', backdropFilter: 'blur(12px)',
+          borderRadius: '16px', border: '1px solid rgba(255, 255, 255, 0.1)', boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
       }}>
           <input 
-            type="text"
-            placeholder={isSending ? "Dan myśli..." : "Pisz tutaj (np. 'Co robić?')..."}
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleGlobalChat()}
-            disabled={isSending}
-            style={{
-                flex: 1,
-                background: 'transparent',
-                border: 'none',
-                color: '#fff',
-                fontSize: '16px',
-                padding: '8px',
-                outline: 'none'
-            }}
+            type="text" placeholder={isSending ? "Dan myśli..." : "Pisz tutaj (np. 'Co robić?')..."}
+            value={chatInput} onChange={(e) => setChatInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleGlobalChat()} disabled={isSending}
+            style={{ flex: 1, background: 'transparent', border: 'none', color: '#fff', fontSize: '16px', padding: '8px', outline: 'none' }}
           />
           <button 
-            onClick={handleGlobalChat}
-            disabled={isSending}
-            style={{
-                background: '#12d3b9',
-                border: 'none',
-                borderRadius: '8px',
-                width: '40px',
-                height: '40px',
-                cursor: isSending ? 'wait' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '20px',
-                color: '#000',
-                transition: 'transform 0.2s'
-            }}
+            onClick={handleGlobalChat} disabled={isSending}
+            style={{ background: '#12d3b9', border: 'none', borderRadius: '8px', width: '40px', height: '40px', cursor: isSending ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#000' }}
           >
             {isSending ? '⏳' : '➤'}
           </button>
@@ -335,5 +355,24 @@ const MainPage = ({ onNavigate, onLogout }) => {
     </div>
   );
 };
+
+// Pod-komponent do paska w Hero Section
+const HeroStatBar = ({ label, value, color, icon }) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase' }}>
+            <span>{icon} {label}</span>
+            <span style={{ fontWeight: 'bold', color: color }}>{value}%</span>
+        </div>
+        <div style={{ width: '100%', height: '8px', background: 'rgba(0,0,0,0.5)', borderRadius: '4px', overflow: 'hidden' }}>
+            <div style={{ 
+                width: `${Math.min(100, value)}%`, 
+                height: '100%', 
+                background: color, 
+                boxShadow: `0 0 10px ${color}`, 
+                transition: 'width 1s ease'
+            }}></div>
+        </div>
+    </div>
+);
 
 export default MainPage;

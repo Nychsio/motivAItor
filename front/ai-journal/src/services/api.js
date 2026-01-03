@@ -101,5 +101,50 @@ export const api = {
       headers: getHeaders()
     });
     return res.json();
-  }
+  },
+// sekcja siłowni
+// --- SEKCJA SIŁOWNI (GYM) ---
+// 1. Zapisz trening
+  // Frontend wysyła JSON z datą, nazwą i ćwiczeniami -> Backend to zapisuje w DB
+  saveWorkout: async (workoutData) => {
+    const res = await fetch(`${API_URL}/gym/workouts`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(workoutData)
+    });
+    return res.json();
+  },
+
+  // 2. Pobierz historię treningów
+  // Żeby wyświetlić listę "Ostatnie treningi"
+  getWorkouts: async () => {
+    const res = await fetch(`${API_URL}/gym/workouts`, { 
+      headers: getHeaders() 
+    });
+    return res.json();
+  },
+
+  // 3. Zapytaj Trenera AI (z Guardrailes)
+  askCoach: async (question) => {
+    // Musimy wysłać to jako parametr w URL (query param) dla uproszczenia
+    // lub jako body POST (bezpieczniej). Użyjmy POST z przykładu wyżej.
+    const res = await fetch(`${API_URL}/gym/coach/ask?question=${encodeURIComponent(question)}`, {
+       method: 'POST', // W gym.py dałem POST
+       headers: getHeaders()
+    });
+    return res.json();
+  },
+
+  // --- SEKCJA GRYWALIZACJI (RPG) ---
+  
+  // 4. Pobierz statystyki S.W.H. (Strength, Willpower, Health)
+  // To wywoła funkcję 'calculate_stats' w Pythonie
+  getGamificationStats: async () => {
+    const res = await fetch(`${API_URL}/gamification/stats`, {
+       headers: getHeaders()
+    });
+    return res.json();
+  },
+
+
 };
