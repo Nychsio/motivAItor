@@ -141,7 +141,12 @@ const MainPage = ({ onNavigate, onLogout }) => {
   };
 
   // Dobór awatara (zabezpieczony przed brakiem danych)
-  const currentAvatar = getAvatarForScore(rpgStats.S || 0, rpgStats.W || 0, rpgStats.H || 0);
+  const currentAvatar = getAvatarForScore(
+      rpgStats.S || 0, 
+      rpgStats.W || 0, 
+      rpgStats.H || 0, 
+      isSending // <-- TO JEST KLUCZ DO TERMINALA
+  );
 
   return (
     <div className="main-container" style={{ paddingBottom: '100px' }}> 

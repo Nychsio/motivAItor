@@ -145,6 +145,53 @@ export const api = {
     });
     return res.json();
   },
+// w api.js
 
+  // --- GYM & PLANS ---
+  getExerciseLibrary: async () => {
+    const res = await fetch(`${API_URL}/gym/exercises`, { headers: getHeaders() });
+    return res.json();
+  },
 
+  getPlans: async () => {
+    const res = await fetch(`${API_URL}/gym/plans`, { headers: getHeaders() });
+    return res.json();
+  },
+
+  createPlan: async (planData) => {
+    const res = await fetch(`${API_URL}/gym/plans`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(planData)
+    });
+    return res.json();
+  },
+  
+  deletePlan: async (planId) => {
+      await fetch(`${API_URL}/gym/plans/${planId}`, { method: 'DELETE', headers: getHeaders() });
+  },
+// --- W sekcji GYM ---
+  generatePlanAI: async (description) => {
+    const res = await fetch(`${API_URL}/gym/ai-generate`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ description })
+    });
+    return res.json();
+  },
+  // --- W sekcji GYM ---
+  
+  getGymVolumeStats: async () => {
+    const res = await fetch(`${API_URL}/gym/analytics/volume`, { headers: getHeaders() });
+    return res.json();
+  },
+
+  chatWithGymCoach: async (message) => {
+    const res = await fetch(`${API_URL}/gym/coach/chat`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ message })
+    });
+    return res.json();
+  }
 };
