@@ -120,3 +120,64 @@ class AIChatRequest(BaseModel):
     message: str 
     context_task_id: int | None = None
     context_project_id: int | None = None # Dodamy możliwość czatu o projekcie
+
+
+# --- SEKCJA SIŁOWNI (GYM)---
+
+class ExerciseLogBase(BaseModel):
+    exercise_name: str
+    sets: int
+    reps: str # String, by obsłużyć "12,10,8" lub "12"
+    weight: float
+
+class ExerciseLogCreate(ExerciseLogBase):
+    pass
+
+class ExerciseLog(ExerciseLogBase):
+    id: int
+    session_id: int
+    volume_load: float
+    class Config:
+        from_attributes = True
+
+class WorkoutSessionBase(BaseModel):
+    date: date
+    name: str
+    duration_minutes: int | None = 60
+    note: str | None = None
+
+class WorkoutSessionCreate(WorkoutSessionBase):
+    # To jest kluczowe - frontend wysyła sesję razem z listą ćwiczeń
+    exercises: list[ExerciseLogCreate] 
+
+class WorkoutSession(WorkoutSessionBase):
+    id: int
+    user_id: int
+    exercises: list[ExerciseLog]
+    class Config:
+        from_attributes = True
+        
+
+# --- PLANOWANIE TRENINGÓW ---
+class WorkoutPlanBase(BaseModel):
+    name: str
+    description: str | None = None
+    color: str = "#12d3b9"
+    exercises_structure: list[dict] # Lista obiektów {name, sets, reps}
+
+class WorkoutPlanCreate(WorkoutPlanBase):
+    pass
+
+class WorkoutPlan(WorkoutPlanBase):
+    id: int
+    owner_id: int
+    class Config:
+        from_attributes = True
+
+# Prosty schemat dla listy ćwiczeń (autocomplete)
+class ExerciseOption(BaseModel):
+    id: int
+    title: str
+    body_part: str
+    class Config:
+        from_attributes = True

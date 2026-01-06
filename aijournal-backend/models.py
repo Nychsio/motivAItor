@@ -18,6 +18,15 @@ class User(Base):
     daily_summaries = relationship("DailySummary", back_populates="owner")
     weekly_reports = relationship("WeeklyReport", back_populates="owner")
 
+# --- STATYSTYKI RPG (S.W.H.) ---
+    # Skala 0-100 (może wyjść ponad 100 dla "God Mode")
+    stat_strength = Column(Float, default=0.0)    # Siłownia
+    stat_willpower = Column(Float, default=0.0)   # Zadania/Projekty
+    stat_health = Column(Float, default=0.0)      # Sen/Kalorie
+    
+    # Relacja do workoutów (jeśli jeszcze nie dodałeś po ostatniej wiadomości)
+    workouts = relationship("WorkoutSession", back_populates="owner")
+    workout_plans = relationship("WorkoutPlan", back_populates="owner")
 # --- PROJEKTY ---
 class Project(Base):
     __tablename__ = "projects"
@@ -110,3 +119,73 @@ class WeeklyReport(Base):
     ai_strategy = Column(Text)
     metrics_avg = Column(JSONB)
     owner = relationship("User", back_populates="weekly_reports")
+    
+    
+    
+# --- MODELS.PY (DODATEK GYM) ---
+
+# Tabela Sesji Treningowej (Nagłówek)
+class WorkoutSession(Base):
+    __tablename__ = "workout_sessions"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    date = Column(Date, nullable=False, index=True)
+    name = Column(String, nullable=False) # Np. "Push A"
+    duration_minutes = Column(Integer, default=60)
+    note = Column(Text, nullable=True) # Jakieś odczucia subiektywne
+    
+    # Relacja do logów ćwiczeń
+    exercises = relationship("ExerciseLog", back_populates="session", cascade="all, delete-orphan")
+    owner = relationship("User", back_populates="workouts")
+
+# Tabela Logów Ćwiczeń (Konkretne serie)
+class ExerciseLog(Base):
+    __tablename__ = "exercise_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("workout_sessions.id"))
+    
+    exercise_name = Column(String, nullable=False) # Np. "Bench Press"
+    sets = Column(Integer, default=3)
+    reps = Column(String, default="10") # String, bo czasem wpisujesz "12,10,8"
+    weight = Column(Float, default=0.0) # Największy ciężar w serii roboczej
+    volume_load = Column(Float, default=0.0) # sets * reps * weight (liczone przez backend/front)
+    
+    session = relationship("WorkoutSession", back_populates="exercises")
+
+# UWAGA: Dodaj relację 'workouts' w klasie User na górze pliku:
+# class User(Base):
+#     ...
+#     workouts = relationship("WorkoutSession", back_populates="owner")
+
+# G:\MotivAItor\aijournal-backend\models.py
+
+# ... (istniejące modele)
+
+# 1. BIBLIOTEKA ĆWICZEŃ (To pochodzi z Kaggle)
+class ExerciseLibrary(Base):
+    __tablename__ = "exercise_library"
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True) # Nazwa ćwiczenia
+    desc = Column(Text, nullable=True) # Opis
+    type = Column(String, nullable=True) # np. Strength
+    body_part = Column(String, nullable=True) # np. Chest
+    equipment = Column(String, nullable=True) # np. Barbell
+    level = Column(String, nullable=True) # np. Intermediate
+
+# 2. SZABLON PLANU TRENINGOWEGO (To co widzisz jako karty do przeciągania)
+class WorkoutPlan(Base):
+    __tablename__ = "workout_plans"
+    id = Column(Integer, primary_key=True, index=True)
+    owner_id = Column(Integer, ForeignKey("users.id"))
+    name = Column(String, nullable=False) # Np. "Push A"
+    description = Column(String, nullable=True)
+    color = Column(String, default="#12d3b9")
+    
+    # Przechowujemy strukturę planu jako JSON (prościej niż robić osobną tabelę relacji dla szablonu)
+    # Format: [{"name": "Bench Press", "sets": 3, "reps": "10"}, ...]
+    exercises_structure = Column(JSONB, default=[]) 
+
+    owner = relationship("User", back_populates="workout_plans")
+
+# Pamiętaj dodać relację w klasie User na górze pliku:
+# workout_plans = relationship("WorkoutPlan", back_populates="owner")

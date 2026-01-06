@@ -12,7 +12,7 @@ import time
 import random
 from sqlalchemy.exc import OperationalError
 import os
-
+import gym_app # <--- Nowa nazwa
 # Importujemy nasze moduły
 from database import get_db, engine
 import models
@@ -172,12 +172,30 @@ def create_new_project(
 # === AI BRAIN DUMP & TOOLS ===
 
 def call_lm_studio(text: str, system_prompt: str = None) -> str:
-    LM_STUDIO_URL = "http://localhost:1234/v1/chat/completions"
+    # Pobieramy konfigurację z .env
+    api_key = os.getenv("AI_API_KEY") # Jeśli brak, to None
+    base_url = os.getenv("AI_BASE_URL", "http://localhost:1234/v1") # Fallback na local
+    model_name = os.getenv("AI_MODEL_NAME", "local-model")
+    
+    # URL do endpointu chat completions
+    # Jeśli w .env masz "https://api.deepseek.com", to dodajemy końcówkę
+    # Jeśli używasz LM Studio, upewnij się że URL w .env ma "/v1" lub dodaj tu logikę
+    if "chat/completions" not in base_url:
+        url = f"{base_url}/chat/completions"
+    else:
+        url = base_url
+
     if not system_prompt:
         system_prompt = "Jesteś asystentem produktywności."
     
+    headers = {
+        "Content-Type": "application/json",
+        # Jeśli jest klucz (DeepSeek), dodajemy go. LM Studio to zignoruje.
+        "Authorization": f"Bearer {api_key}" if api_key else ""
+    }
+
     payload = {
-        "model": "local-model",
+        "model": model_name,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": text}
@@ -187,10 +205,13 @@ def call_lm_studio(text: str, system_prompt: str = None) -> str:
     }
 
     try:
-        print(f"AI Request: Wysyłam do {LM_STUDIO_URL}...")
-        response = requests.post(LM_STUDIO_URL, json=payload, headers={"Content-Type": "application/json"}, timeout=60)
+        # print(f"AI Request: Wysyłam do {url}...")
+        response = requests.post(url, json=payload, headers=headers, timeout=60)
+        
         if response.status_code != 200:
+            print(f"AI Error {response.status_code}: {response.text}")
             return "[]"
+            
         data = response.json()
         return data['choices'][0]['message']['content']
     except Exception as e:
@@ -233,26 +254,44 @@ def process_braindump_with_ai(
         created_tasks.append(new_task)
     return created_tasks
 
-def ai_estimate_calories(text: str) -> int:
-    # ... (kod bez zmian, można dodać cache RAG w przyszłości)
-    LM_STUDIO_URL = "http://localhost:1234/v1/chat/completions"
+@app.post("/api/ai/estimate-calories")
+def estimate_calories(request: schemas.CalorieRequest):
+    api_key = os.getenv("AI_API_KEY")
+    base_url = os.getenv("AI_BASE_URL", "http://localhost:1234/v1")
+    model_name = os.getenv("AI_MODEL_NAME", "local-model")
+    
+    if "chat/completions" not in base_url:
+        url = f"{base_url}/chat/completions"
+    else:
+        url = base_url
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}" if api_key else ""
+    }
+    
     payload = {
-        "model": "local-model",
+        "model": model_name,
         "messages": [
-            {"role": "system", "content": "Jesteś dietetykiem. Podaj TYLKO liczbę kalorii (int)."},
-            {"role": "user", "content": f"Oszacuj kalorie: {text}"}
+            {"role": "system", "content": "Jesteś dietetykiem. Podaj TYLKO liczbę kalorii (int). Nie pisz nic więcej."},
+            {"role": "user", "content": f"Oszacuj kalorie: {request.text}"}
         ],
         "temperature": 0.1
     }
+    
     try:
-        response = requests.post(LM_STUDIO_URL, json=payload, timeout=10)
-        content = response.json()['choices'][0]['message']['content']
-        import re
-        numbers = re.findall(r'\d+', content)
-        return int(numbers[0]) if numbers else 0
-    except:
-        return 0
-
+        res = requests.post(url, json=payload, headers=headers, timeout=10)
+        if res.status_code == 200:
+            content = res.json()['choices'][0]['message']['content']
+            import re
+            nums = re.findall(r'\d+', content)
+            return {"calories": int(nums[0]) if nums else 0}
+        return {"calories": 0}
+    except Exception as e:
+        print(f"AI Calorie Error: {e}")
+        return {"calories": 0}
+    
+    
 @app.post("/api/ai/estimate-calories")
 def estimate_calories(request: schemas.CalorieRequest):
     return {"calories": ai_estimate_calories(request.text)}
@@ -408,3 +447,49 @@ def reindex_existing_data(
         h_count += 1
         
     return {"status": "success", "indexed_tasks": t_count, "indexed_health": h_count}
+
+@app.get("/api/gamification/stats")
+def get_rpg_stats(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_active_user)
+):
+    import gamification
+    return gamification.calculate_stats(current_user, db)
+
+
+# REJESTRACJA ROUTERA GYM
+app.include_router(gym_app.router) # <--- Nowa nazwa
+
+# === NOWY SERWIS AI (GENERIC OPENAI STYLE) ===
+# To obsłuży LM Studio, OpenAI, Kimi, DeepSeek - zależy co wpiszesz w .env
+
+AI_BASE_URL = os.getenv("AI_BASE_URL", "http://localhost:1234/v1") # Domyślnie lokalnie
+AI_API_KEY = os.getenv("AI_API_KEY", "lm-studio") # Dla locala dowolny, dla Kimi prawdziwy
+
+def call_ai_api(user_message: str, system_message: str = "You are a helpful assistant.", temperature: float = 0.7) -> str:
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {AI_API_KEY}"
+    }
+    
+    payload = {
+        "model": os.getenv("AI_MODEL_NAME", "local-model"), # Np. "moonshot-v1-8k"
+        "messages": [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_message}
+        ],
+        "temperature": temperature,
+        "stream": False
+    }
+
+    try:
+        response = requests.post(f"{AI_BASE_URL}/chat/completions", json=payload, headers=headers, timeout=60)
+        if response.status_code != 200:
+            print(f"AI Error {response.status_code}: {response.text}")
+            return "AI Error: Service unavailable."
+        
+        data = response.json()
+        return data['choices'][0]['message']['content']
+    except Exception as e:
+        print(f"AI Connection Error: {e}")
+        return "AI Error: Connection failed."
