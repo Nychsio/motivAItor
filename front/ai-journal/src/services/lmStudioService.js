@@ -1,9 +1,9 @@
 // src/services/lmStudioService.js
-// KURWA, PROSTY SERWIS DO LM STUDIO!
+//  PROSTY SERWIS DO LM STUDIO!
 
 class LMStudioService {
   constructor() {
-    this.baseURL = 'http://localhost:1234/v1';
+    this.baseURL = 'https://wackier-deliberately-leighann.ngrok-free.dev/v1';
     this.model = 'local-model'; // LM Studio używa tego jako default
   }
 

@@ -19,7 +19,7 @@ const HealthPage = ({ onBack }) => {
     
     setIsAiLoading(true);
     try {
-      const response = await fetch('http://localhost:3001/api/ai/estimate-calories', {
+      const response = await fetch('https://wackier-deliberately-leighann.ngrok-free.dev/api/ai/estimate-calories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: input })
@@ -61,7 +61,7 @@ const HealthPage = ({ onBack }) => {
     };
 
     // Strzał do endpointu, który stworzyłeś wcześniej
-    await fetch('http://localhost:3001/api/health', {
+    await fetch('https://wackier-deliberately-leighann.ngrok-free.dev/api/health', {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',

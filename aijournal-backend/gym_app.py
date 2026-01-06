@@ -11,7 +11,7 @@ import models
 import schemas
 import database
 import auth
-
+import rag
 # Konfiguracja routera
 router = APIRouter(
     prefix="/api/gym",
@@ -179,6 +179,9 @@ def log_workout(
     db.commit()
     db.refresh(db_session)
     
+    total_vol = 0
+    exercise_summaries = []
+
     for ex in workout.exercises:
         calc_reps = 0
         try:
@@ -188,6 +191,10 @@ def log_workout(
             calc_reps = 0
             
         calculated_volume = ex.sets * calc_reps * ex.weight
+        total_vol += calculated_volume
+
+        # Zbieramy info do RAG
+        exercise_summaries.append(f"{ex.exercise_name}: {ex.sets}x{ex.reps} @ {ex.weight}kg")
 
         db_log = models.ExerciseLog(
             session_id=db_session.id,
@@ -201,6 +208,26 @@ def log_workout(
     
     db.commit()
     db.refresh(db_session)
+
+    # --- RAG SYNC (NOWOŚĆ) ---
+    # Tworzymy notatkę tekstową dla AI
+    rag_content = f"Trening '{workout.name}' (Czas: {workout.duration_minutes}min, Objętość: {total_vol}kg). Ćwiczenia: {', '.join(exercise_summaries)}. Notatka: {workout.note or ''}"
+    
+    try:
+        rag.add_document(
+            doc_id=f"workout_{db_session.id}", 
+            text=rag_content, 
+            metadata={
+                "type": "workout", 
+                "date": str(workout.date)
+            },
+            user_id=current_user.id  # <--- DODANO TO: Bezpieczeństwo
+        )
+        print(f"[GYM] Trening zindeksowany w RAG dla User {current_user.id}")
+    except Exception as e:
+        print(f"[GYM] Błąd indeksowania RAG: {e}")
+    # -------------------------
+
     return db_session
 
 # 7. Pobieranie historii

@@ -20,7 +20,7 @@ const ProjectModal = ({ isOpen, onClose, onProjectCreated }) => {
     const token = localStorage.getItem('accessToken');
 
     try {
-      const response = await fetch('http://localhost:3001/api/projects', {
+      const response = await fetch('https://wackier-deliberately-leighann.ngrok-free.dev/api/projects', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

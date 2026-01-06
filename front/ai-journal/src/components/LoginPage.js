@@ -42,7 +42,7 @@ const LoginPage = ({ onLogin }) => {
     setErrorMessage(''); // Wyczyść błędy
     
     if (!username || !password) {
-      setErrorMessage('Kurwa, wpisz login i hasło!');
+      setErrorMessage('wpisz login i hasło!');
       return;
     }
 
@@ -68,7 +68,7 @@ const LoginPage = ({ onLogin }) => {
 
 
     try {
-      const response = await fetch('http://localhost:3001/api/login', {
+      const response = await fetch('https://wackier-deliberately-leighann.ngrok-free.dev/api/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
@@ -93,7 +93,7 @@ const LoginPage = ({ onLogin }) => {
       
     } catch (error) {
       console.log('Error:', error.message);
-      setErrorMessage(error.message + ', kurwa!');
+      setErrorMessage(error.message );
     } finally {
       setIsLoading(false);
     }

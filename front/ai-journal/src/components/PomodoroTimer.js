@@ -63,7 +63,7 @@ const PomodoroTimer = ({ projects = [] }) => {
           project_id: selectedProjectId ? parseInt(selectedProjectId) : null
       };
 
-      await fetch('http://localhost:3001/api/pomodoro', {
+      await fetch('https://wackier-deliberately-leighann.ngrok-free.dev/api/pomodoro', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

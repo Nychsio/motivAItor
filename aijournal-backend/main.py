@@ -20,7 +20,9 @@ import schemas
 import crud
 import auth
 import rag # <--- TWÓJ MODUŁ RAG (musi być plik rag.py obok)
+from dotenv import load_dotenv
 
+load_dotenv()
 # Pętla oczekiwania na bazę danych (Retry Pattern)
 MAX_RETRIES = 10
 WAIT_SECONDS = 3
@@ -45,7 +47,7 @@ origins = [
 ]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -94,7 +96,9 @@ def create_task(
                 "type": "task", 
                 "date": str(new_task.task_date) if new_task.task_date else "inbox",
                 "project_id": str(new_task.project_id or "none")
-            }
+            },
+            
+            user_id=current_user.id
         )
     except Exception as e:
         print(f"RAG Error (Task): {e}")
@@ -248,7 +252,7 @@ def process_braindump_with_ai(
         new_task = crud.create_user_task(db=db, task=task_data, user_id=current_user.id)
         
         # --- RAG INDEXING ---
-        rag.add_document(f"task_{new_task.id}", new_task.content, {"type": "task", "date": str(request.task_date or "inbox")})
+        rag.add_document(f"task_{new_task.id}", new_task.content, {"type": "task", "date": str(request.task_date or "inbox")},user_id=current_user.id)
         # --------------------
         
         created_tasks.append(new_task)
@@ -292,9 +296,7 @@ def estimate_calories(request: schemas.CalorieRequest):
         return {"calories": 0}
     
     
-@app.post("/api/ai/estimate-calories")
-def estimate_calories(request: schemas.CalorieRequest):
-    return {"calories": ai_estimate_calories(request.text)}
+
 
 # === RAG ENHANCED CHAT ===
 
@@ -305,7 +307,7 @@ def chat_with_context(
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
     # 1. RAG SEARCH (Szukamy wiedzy w bazie)
-    context_from_db = rag.search_documents(request.message, n_results=3)
+    context_from_db = rag.search_documents(request.message,user_id=current_user.id, n_results=3)
     
     # 2. Budujemy Prompt z kontekstem RAG i Projektem
     project_context = ""
@@ -342,7 +344,7 @@ def create_health_entry(
     # --- RAG INDEXING ---
     # AI musi pamiętać, że byłeś gruby/smutny danego dnia
     note_content = f"Dnia {new_entry.date}: Waga {new_entry.weight}kg, Sen {new_entry.sleep_hours}h. Notatka: {new_entry.note}"
-    rag.add_document(f"health_{new_entry.id}", note_content, {"type": "health", "date": str(new_entry.date)})
+    rag.add_document(f"health_{new_entry.id}", note_content, {"type": "health", "date": str(new_entry.date)},user_id=current_user.id)
     # --------------------
     
     return new_entry
@@ -380,18 +382,40 @@ def get_daily_roast(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_active_user)
 ):
-    score, completed, rusting = calculate_performance_score(db, current_user.id)
+    score, completed_today, rusting_count = calculate_performance_score(db, current_user.id)
     
-    # RAG dla Roasta - sprawdzamy co user ostatnio robił, żeby go lepiej obrazić
-    recent_context = rag.search_documents("wymówki lenistwo problemy", n_results=2)
+    # Get rusting projects names
+    projects = crud.get_projects_with_stats(db, user_id=current_user.id)
+    rusting_projects = [p for p in projects if p.stats.get('is_rusting', False)]
+    rusting_projects_names = ", ".join([p.name for p in rusting_projects]) if rusting_projects else "Brak"
+    
+    # Recent activity summary
+    recent_activity_summary = f"Ukończone zadania dziś: {completed_today}, rdzewiejące projekty: {rusting_count}"
+    
+    # RAG for roast
+    recent_context = rag.search_documents("wymówki lenistwo problemy", user_id=current_user.id, n_results=2)
 
     system_prompt = f"""
-    Jesteś Danem Peña. Wynik usera: {score}/100.
-    Ostatnia aktywność usera (z bazy): {recent_context}
-    
-    Jeśli wynik < 30: Zniszcz go. Wykorzystaj wiedzę z bazy przeciwko niemu.
-    Jeśli wynik > 70: Tough love.
-    Krótko (2 zdania).
+    SYSTEM:
+    Jesteś MotivAItor – hybryda stoickiego nauczyciela i bezlitosnego stratega wojskowego. Twoim celem jest wymuszenie na użytkowniku realizacji celów poprzez mechanizm Loss Aversion i psychologię Tough Love.
+
+    PARAMETRY WEJŚCIOWE:
+    - Score: {score}/100 (Wynik ogólny wydajności).
+    - Status: {rusting_projects_names} (Projekty, które rdzewieją).
+    - Ostatnia aktywność: {recent_activity_summary} (Co zrobił lub czego NIE zrobił).
+
+    ZASADY GENEROWANIA:
+    1. WYNIK < 30 (Tryb Destrukcji): Nie miej litości. Wykorzystaj nazwy jego własnych projektów, by pokazać mu, jak bardzo je zawodzi. Używaj sarkazmu.
+    2. WYNIK 30-70 (Tryb Dyscypliny): Zimna analiza. Wskaż marnotrawstwo czasu.
+    3. WYNIK > 70 (Tryb Szacunku): Uznaj wyniki, ale natychmiast podnieś poprzeczkę.
+
+    STYL:
+    - Maksimum 3 zdania. 
+    - Żadnych emoji (chyba że 💀 przy wyniku < 30).
+    - Zero litości dla "braku czasu".
+
+    PRZYKŁAD DLA SŁABEGO WYNIKU:
+    "Twój projekt '{rusting_projects_names or 'projekt'}' nie rdzewieje – on gnije. Patrzenie na te {score} punktów to marnowanie moich procesorów."
     """
     
     roast_text = call_lm_studio("Roast me", system_prompt)
@@ -407,10 +431,10 @@ def chat_with_roast_master(
     score, _, _ = calculate_performance_score(db, current_user.id)
     
     # RAG w dyskusji z Danem
-    context = rag.search_documents(request.message, n_results=2)
+    context = rag.search_documents(request.message,user_id=current_user.id, n_results=2)
 
     system_prompt = f"""
-    Jesteś Danem Peña. Wynik: {score}/100.
+    Jesteś Bosem ostatecznym. Wynik: {score}/100.
     Użytkownik się tłumaczy: "{request.message}"
     
     FAKTY Z BAZY (Użyj, by wykazać mu kłamstwo):
@@ -435,7 +459,7 @@ def reindex_existing_data(
     tasks = db.query(models.Task).filter(models.Task.owner_id == current_user.id).all()
     t_count = 0
     for t in tasks:
-        rag.add_document(f"task_{t.id}", t.content, {"type": "task", "date": str(t.task_date or "inbox")})
+        rag.add_document(f"task_{t.id}", t.content, {"type": "task", "date": str(t.task_date or "inbox")},user_id=current_user.id)
         t_count += 1
         
     # 2. Zdrowie
@@ -443,7 +467,7 @@ def reindex_existing_data(
     h_count = 0
     for h in healths:
         note = f"Dnia {h.date}: Waga {h.weight}, Sen {h.sleep_hours}. {h.note or ''}"
-        rag.add_document(f"health_{h.id}", note, {"type": "health", "date": str(h.date)})
+        rag.add_document(f"health_{h.id}", note, {"type": "health", "date": str(h.date)},user_id=current_user.id)
         h_count += 1
         
     return {"status": "success", "indexed_tasks": t_count, "indexed_health": h_count}
@@ -455,7 +479,6 @@ def get_rpg_stats(
 ):
     import gamification
     return gamification.calculate_stats(current_user, db)
-
 
 # REJESTRACJA ROUTERA GYM
 app.include_router(gym_app.router) # <--- Nowa nazwa

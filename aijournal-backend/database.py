@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base # <--- ZMIANA IMPORTU (Nowy standard)
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 import os
 from dotenv import load_dotenv
 
@@ -17,7 +18,12 @@ if not SQLALCHEMY_DATABASE_URL:
     raise ValueError("Brakuje DATABASE_URL w zmiennych środowiskowych! Piotr, ogarnij to (albo sprawdź .env/docker-compose).")
 
 # Tworzymy silnik
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    pool_size=20,       # Zwiększamy z 5 na 20 stałych połączeń
+    max_overflow=40,    # Pozwalamy na 40 dodatkowych w razie tłoku
+    pool_timeout=60     # Czekamy 60s zanim wywalimy błąd (zamiast 30s)
+)
 
 # Fabryka sesji
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

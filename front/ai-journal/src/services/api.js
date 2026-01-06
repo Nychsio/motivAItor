@@ -1,197 +1,164 @@
-// src/services/api.js
-const API_URL = 'http://localhost:3001/api';
+// Adres Twojego tunelu (BEZ PORTU, BEZ UKOŚNIKA NA KOŃCU)
+const BASE_URL = 'https://wackier-deliberately-leighann.ngrok-free.dev';
 
-const getHeaders = () => {
-  const token = localStorage.getItem('accessToken');
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`
-  };
+// === SERCE KOMUNIKACJI (WRAPPER) ===
+// Ta funkcja obsługuje każde zapytanie w aplikacji
+const request = async (endpoint, options = {}) => {
+    // 1. Budowanie pełnego URL
+    // Jeśli endpoint zaczyna się od /api, zostawiamy, jeśli nie, dodajemy /api
+    const path = endpoint.startsWith('/api') ? endpoint : `/api${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
+    const url = `${BASE_URL}${path}`;
+
+    // 2. Pobieranie tokenu
+    const token = localStorage.getItem('accessToken');
+
+    // 3. Budowanie nagłówków (TO JEST KLUCZOWE DLA NGROKA)
+    const headers = {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true', // <--- OMIJA BLOKADĘ NGROKA
+        ...(token && { 'Authorization': `Bearer ${token}` }), // Dodaj token jeśli jest
+        ...options.headers,
+    };
+
+    const config = {
+        ...options,
+        headers,
+    };
+
+    try {
+        const response = await fetch(url, config);
+
+        // 4. Globalna obsługa wylogowania (gdy token wygaśnie)
+        if (response.status === 401) {
+            console.warn('Sesja wygasła. Przekierowanie do logowania...');
+            localStorage.removeItem('accessToken');
+            window.location.href = '/login'; 
+            return null;
+        }
+
+        // 5. Bezpieczne parsowanie odpowiedzi
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+            return await response.json();
+        } else {
+            // Jeśli backend nie zwrócił JSON-a (np. pusty sukces 200 OK)
+            if (response.ok) return { status: 'ok' };
+            return await response.text();
+        }
+    } catch (error) {
+        console.error(`API Error at ${endpoint}:`, error);
+        throw error;
+    }
 };
 
+// === DEFINICJE ENDPOINTÓW ===
 export const api = {
+    // --- AUTH ---
+    login: (credentials) => request('/login', { method: 'POST', body: JSON.stringify(credentials) }),
 
-  // Pobiera zadania na konkretny dzień
-  getTasks: async (dateStr) => {
-    const res = await fetch(`${API_URL}/tasks/${dateStr}`, { headers: getHeaders() });
-    return res.json();
-  },
-
-  // 1. Pobieranie Inboxa (zaktualizowane o użycie API_URL i getHeaders)
-  getInboxTasks: async () => {
-    const res = await fetch(`${API_URL}/tasks/inbox`, { 
-      headers: getHeaders() 
-    });
-    return res.json();
-  },
-
-  // 2. Aktualizacja zadania (np. zmiana daty przy Drag & Drop)
-  updateTask: async (taskId, updates) => {
-    // UWAGA DO BACKENDU (Piotr):
-    // Upewnij się, że w main.py istnieje endpoint PUT /api/tasks/{task_id}
-    // Przyjmujący model TaskUpdate (lub podobny partial update).
+    // --- TASKS ---
+    getTasks: (dateStr) => request(`/tasks/${dateStr}`),
     
-    const res = await fetch(`${API_URL}/tasks/${taskId}`, {
-      method: 'PUT', // lub PATCH, zależnie od implementacji backendu
-      headers: getHeaders(),
-      body: JSON.stringify(updates)
-    });
-    return res.json();
-  },
+    getInboxTasks: () => request('/tasks/inbox'),
+    
+    // Obsługa tygodnia (tymczasowo dzisiejsza data)
+    getWeeklyTasks: () => {
+        const dateStr = new Date().toISOString().split('T')[0];
+        return request(`/tasks/${dateStr}`);
+    },
 
-  // TO DO: Backend musi obsłużyć zakres dat dla widoku tygodniowego
-  // Na razie pobierzemy dzisiejsze jako placeholder
-  getWeeklyTasks: async () => {
-     // Tutaj w przyszłości: ?start_date=X&end_date=Y
-    const dateStr = new Date().toISOString().split('T')[0]; 
-    const res = await fetch(`${API_URL}/tasks/${dateStr}`, { headers: getHeaders() });
-    return res.json();
-  },
+    addTask: (taskData) => request('/tasks', { 
+        method: 'POST', 
+        body: JSON.stringify(taskData) 
+    }),
 
-  getProjects: async () => {
-    const res = await fetch(`${API_URL}/projects`, { headers: getHeaders() });
-    return res.json();
-  },
+    updateTask: (taskId, updates) => request(`/tasks/${taskId}`, { 
+        method: 'PUT', 
+        body: JSON.stringify(updates) 
+    }),
 
-  addTask: async (taskData) => {
-    const res = await fetch(`${API_URL}/tasks`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(taskData)
-    });
-    return res.json();
-  },
+    toggleTask: (taskId) => request(`/tasks/${taskId}/toggle`, { method: 'PUT' }),
 
-  toggleTask: async (taskId) => {
-    const res = await fetch(`${API_URL}/tasks/${taskId}/toggle`, {
-        method: 'PUT',
-        headers: getHeaders()
-    });
-    return res.json();
-  },
+    deleteTask: (taskId) => request(`/tasks/${taskId}`, { method: 'DELETE' }),
 
-  // Logika Drag & Drop Chat
-  chatWithAI: async (message, contextTaskId = null) => {
-    const body = { message };
-    if (contextTaskId) body.context_task_id = contextTaskId;
+    // --- PROJECTS ---
+    getProjects: () => request('/projects'),
 
-    const res = await fetch(`${API_URL}/ai/chat`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(body)
-    });
-    return res.json();
-  },
-
-  processBrainDump: async (text, dateStr) => {
-    const res = await fetch(`${API_URL}/ai/process-braindump`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({
-        text: text,
-        task_date: dateStr
-      })
-    });
-    return res.json();
-  },
-
-  deleteTask: async (taskId) => {
-    const res = await fetch(`${API_URL}/tasks/${taskId}`, {
-      method: 'DELETE',
-      headers: getHeaders()
-    });
-    return res.json();
-  },
-// sekcja siłowni
-// --- SEKCJA SIŁOWNI (GYM) ---
-// 1. Zapisz trening
-  // Frontend wysyła JSON z datą, nazwą i ćwiczeniami -> Backend to zapisuje w DB
-  saveWorkout: async (workoutData) => {
-    const res = await fetch(`${API_URL}/gym/workouts`, {
-      method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify(workoutData)
-    });
-    return res.json();
-  },
-
-  // 2. Pobierz historię treningów
-  // Żeby wyświetlić listę "Ostatnie treningi"
-  getWorkouts: async () => {
-    const res = await fetch(`${API_URL}/gym/workouts`, { 
-      headers: getHeaders() 
-    });
-    return res.json();
-  },
-
-  // 3. Zapytaj Trenera AI (z Guardrailes)
-  askCoach: async (question) => {
-    // Musimy wysłać to jako parametr w URL (query param) dla uproszczenia
-    // lub jako body POST (bezpieczniej). Użyjmy POST z przykładu wyżej.
-    const res = await fetch(`${API_URL}/gym/coach/ask?question=${encodeURIComponent(question)}`, {
-       method: 'POST', // W gym.py dałem POST
-       headers: getHeaders()
-    });
-    return res.json();
-  },
-
-  // --- SEKCJA GRYWALIZACJI (RPG) ---
-  
-  // 4. Pobierz statystyki S.W.H. (Strength, Willpower, Health)
-  // To wywoła funkcję 'calculate_stats' w Pythonie
-  getGamificationStats: async () => {
-    const res = await fetch(`${API_URL}/gamification/stats`, {
-       headers: getHeaders()
-    });
-    return res.json();
-  },
-// w api.js
-
-  // --- GYM & PLANS ---
-  getExerciseLibrary: async () => {
-    const res = await fetch(`${API_URL}/gym/exercises`, { headers: getHeaders() });
-    return res.json();
-  },
-
-  getPlans: async () => {
-    const res = await fetch(`${API_URL}/gym/plans`, { headers: getHeaders() });
-    return res.json();
-  },
-
-  createPlan: async (planData) => {
-    const res = await fetch(`${API_URL}/gym/plans`, {
+    createProject: (projectData) => request('/projects', {
         method: 'POST',
-        headers: getHeaders(),
+        body: JSON.stringify(projectData)
+    }),
+
+    // --- CORE AI & BRAIN DUMP ---
+    processBrainDump: (text, dateStr) => request('/ai/process-braindump', {
+        method: 'POST',
+        body: JSON.stringify({ text, task_date: dateStr })
+    }),
+
+    chatWithAI: (message, contextTaskId = null) => {
+        const body = { message };
+        if (contextTaskId) body.context_task_id = contextTaskId;
+        return request('/ai/chat', { method: 'POST', body: JSON.stringify(body) });
+    },
+    
+    estimateCalories: (text) => request('/ai/estimate-calories', {
+        method: 'POST',
+        body: JSON.stringify({ text })
+    }),
+
+    // --- GYM & WORKOUTS (SIŁOWNIA) ---
+    saveWorkout: (workoutData) => request('/gym/workouts', {
+        method: 'POST',
+        body: JSON.stringify(workoutData)
+    }),
+
+    getWorkouts: () => request('/gym/workouts'),
+
+    getExerciseLibrary: () => request('/gym/exercises'),
+
+    // --- PLANS (Szablony Treningowe) ---
+    getPlans: () => request('/gym/plans'),
+
+    createPlan: (planData) => request('/gym/plans', {
+        method: 'POST',
         body: JSON.stringify(planData)
-    });
-    return res.json();
-  },
-  
-  deletePlan: async (planId) => {
-      await fetch(`${API_URL}/gym/plans/${planId}`, { method: 'DELETE', headers: getHeaders() });
-  },
-// --- W sekcji GYM ---
-  generatePlanAI: async (description) => {
-    const res = await fetch(`${API_URL}/gym/ai-generate`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ description })
-    });
-    return res.json();
-  },
-  // --- W sekcji GYM ---
-  
-  getGymVolumeStats: async () => {
-    const res = await fetch(`${API_URL}/gym/analytics/volume`, { headers: getHeaders() });
-    return res.json();
-  },
+    }),
 
-  chatWithGymCoach: async (message) => {
-    const res = await fetch(`${API_URL}/gym/coach/chat`, {
+    deletePlan: (planId) => request(`/gym/plans/${planId}`, { method: 'DELETE' }),
+
+    // AI Architect (Generator Planów)
+    generatePlanAI: (description) => request('/gym/ai-generate', {
         method: 'POST',
-        headers: getHeaders(),
+        body: JSON.stringify({ description })
+    }),
+
+    // --- GYM AI COACH & ANALYTICS ---
+    getGymVolumeStats: () => request('/gym/analytics/volume'),
+
+    chatWithGymCoach: (message) => request('/gym/coach/chat', {
+        method: 'POST',
         body: JSON.stringify({ message })
-    });
-    return res.json();
-  }
+    }),
+
+    // --- GAMIFICATION & HEALTH ---
+    getGamificationStats: () => request('/gamification/stats'),
+
+    saveDailyHealth: (healthData) => request('/health', {
+        method: 'POST',
+        body: JSON.stringify(healthData)
+    }),
+    
+    savePomodoro: (sessionData) => request('/pomodoro', {
+        method: 'POST',
+        body: JSON.stringify(sessionData)
+    }),
+
+    chatRoast: (message) => request('/ai/roast-chat', { 
+        method: 'POST', 
+        body: JSON.stringify({ message }) 
+    }),
+
+    getRoast: () => request('/ai/roast')
+    
+    
 };

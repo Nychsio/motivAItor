@@ -20,9 +20,9 @@ const MainPage = ({ onNavigate, onLogout }) => {
 
   // --- STANY RPG (S.W.H.) ---
   const [rpgStats, setRpgStats] = useState({ S: 0, W: 0, H: 0 });
-
+  
   // --- STANY ROAST MASTER ---
-  const [roastData, setRoastData] = useState({ roast: 'Inicjalizacja łącza z Danem...', score: 50 });
+  const [roastData, setRoastData] = useState({ roast: 'Inicjalizacja łącza z ejajem...', score: 50 });
   const [chatInput, setChatInput] = useState(''); 
   const [isSending, setIsSending] = useState(false); 
 
@@ -36,7 +36,6 @@ const MainPage = ({ onNavigate, onLogout }) => {
   useEffect(() => {
     fetchTodayTasks();
     fetchProjects(); 
-    fetchRoast(); 
     fetchRpgStats(); 
     
     const savedUser = localStorage.getItem('username') || 'Studencie';
@@ -76,16 +75,21 @@ const MainPage = ({ onNavigate, onLogout }) => {
   };
 
   const fetchRoast = async () => {
+    // Sprawdzamy czy user jest zalogowany
     const token = localStorage.getItem('accessToken');
+    if (!token) return;
+
     try {
-        const res = await fetch('http://localhost:3001/api/ai/roast', {
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (res.ok) {
-            const data = await res.json();
+        // Używamy api.getRoast() zamiast wpisywać link ręcznie
+        const data = await api.getRoast();
+        
+        if (data && data.roast) {
             setRoastData(data);
         }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+        console.error("Błąd Roasta:", e);
+        setRoastData(prev => ({ ...prev, roast: "Nie udało się połączyć z AI." }));
+    }
   };
 
   const fetchRpgStats = async () => {
@@ -97,35 +101,33 @@ const MainPage = ({ onNavigate, onLogout }) => {
       }
   };
 
+
+  // TO JEST NAPRAWA: Owijamy wywołanie w useEffect z pustą tablicą []
+  // Dzięki temu wykona się tylko RAZ po załadowaniu strony.
+  useEffect(() => {
+      fetchRoast();
+  }, []);
   // --- CZAT ---
-  const handleGlobalChat = async () => {
+const handleGlobalChat = async () => {
     if (!chatInput.trim() || isSending) return;
     
     const userMsg = chatInput;
     setChatInput(''); 
     setIsSending(true);
     
+    // Zapisujemy stary tekst w razie błędu
     const oldRoast = roastData.roast;
     setRoastData(prev => ({ ...prev, roast: "Myślę nad ripostą..." }));
 
     try {
-        const token = localStorage.getItem('accessToken');
-        const response = await fetch('http://localhost:3001/api/ai/roast-chat', {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}` 
-            },
-            body: JSON.stringify({ message: userMsg })
-        });
-
-        if (response.ok) {
-            const data = await response.json();
+        // Używamy api.chatRoast()
+        const data = await api.chatRoast(userMsg);
+        
+        if (data && data.reply) {
             setRoastData(prev => ({ ...prev, roast: data.reply }));
-        } else {
-            setRoastData(prev => ({ ...prev, roast: "Błąd połączenia. Dan poszedł na kawę." }));
         }
     } catch (e) {
+        console.error("Błąd Czatu:", e);
         setRoastData(prev => ({ ...prev, roast: oldRoast }));
     } finally {
         setIsSending(false);
